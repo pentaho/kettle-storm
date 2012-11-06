@@ -1,0 +1,181 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>org.pentaho.kettle.engines</groupId>
+  <artifactId>kettle-engine-storm</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>kettle-engine-storm</name>
+  <url>http://maven.apache.org</url>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <storm.version>0.8.2</storm.version>
+    <!-- Scope for Storm jar so we can disable the inclusion of it when building an assembly jar with dependencies -->
+    <storm.scope>compile</storm.scope>
+    <storm.signals.version>0.2.0</storm.signals.version>
+    <kettle.version>TRUNK-SNAPSHOT</kettle.version>
+    <main.class>org.pentaho.kettle.engines.storm.KettleStorm</main.class>
+    <kettle.storm.topology.jar>${project.build.finalName}-jar-with-dependencies.jar</kettle.storm.topology.jar>
+  </properties>
+
+  <repositories>
+    <repository>
+      <id>github-releases</id>
+      <url>http://oss.sonatype.org/content/repositories/github-releases/</url>
+    </repository>
+    <repository>
+      <id>clojars.org</id>
+      <url>http://clojars.org/repo</url>
+    </repository>
+    <repository>
+      <id>pentaho</id>
+      <url>http://repo.pentaho.org/artifactory/repo/</url>
+    </repository>
+  </repositories>
+
+  <dependencies>
+    <dependency>
+      <groupId>storm</groupId>
+      <artifactId>storm</artifactId>
+      <version>${storm.version}</version>
+      <!-- keep storm out of the jar-with-dependencies -->
+      <scope>${storm.scope}</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.github.ptgoetz</groupId>
+      <artifactId>storm-signals</artifactId>
+      <version>${storm.signals.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>pentaho-kettle</groupId>
+      <artifactId>kettle-engine</artifactId>
+      <version>${kettle.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>pentaho-kettle</groupId>
+      <artifactId>kettle-core</artifactId>
+      <version>${kettle.version}</version>
+      <exclusions>
+        <exclusion>
+          <groupId>xerces</groupId>
+          <artifactId>xercesImpl</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>xerces</groupId>
+          <artifactId>xmlParserAPIs</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+
+    <dependency>
+      <groupId>commons-vfs</groupId>
+      <artifactId>commons-vfs</artifactId>
+      <version>1.0</version>
+    </dependency>
+
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <version>4.10</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <profiles>
+    <profile>
+      <id>assembly</id>
+      <properties>
+        <storm.scope>provided</storm.scope>
+      </properties>
+    </profile>
+  </profiles>
+
+  <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>true</filtering>
+      </resource>
+    </resources>
+
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>2.3.2</version>
+        <configuration>
+          <source>1.7</source>
+          <target>1.7</target>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>1.2.1</version>
+        <executions>
+          <execution>
+            <goals>
+              <goal>java</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <mainClass>org.pentaho.kettle.engines.storm.KettleStorm</mainClass>
+          <!--
+              Configure the topology jar to point to the one in the target directory.
+              The default path is configured for the release archive directory structure.
+            -->
+          <systemProperties>
+            <property>
+              <key>kettle-storm-topology-jar</key>
+              <value>target/${kettle.storm.topology.jar}</value>
+            </property>
+          </systemProperties>
+        </configuration>
+      </plugin>
+      <plugin>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <configuration>
+          <descriptorRefs>
+            <descriptorRef>jar-with-dependencies</descriptorRef>
+          </descriptorRefs>
+          <archive>
+            <manifest>
+              <mainClass>${main.class}</mainClass>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>2.1</version>
+        <configuration>
+          <transformers>
+            <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+              <manifestEntries>
+                <Main-Class>${main.class}</Main-Class>
+                <X-Compile-Source-JDK>${maven.compile.source}</X-Compile-Source-JDK>
+                <X-Compile-Target-JDK>${maven.compile.target}</X-Compile-Target-JDK>
+              </manifestEntries>
+            </transformer>
+          </transformers>
+        </configuration>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
