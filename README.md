@@ -1,27 +1,14 @@
-kettle-storm
+Kettle for Storm
 ============
 An experimental execution environment to execute a Kettle transformation as a Storm topology.
 
-How to use
-----------
-To run a local in-process Storm cluster for testing:
-```
-mvn compile exec:java -Dexec.args=src/main/resources/test.ktr -Dkettle-storm-local-mode=true
-```
-
-To execute against a running cluster on the same host:
-```
-mvn assembly:assembly -Passembly
-mvn exec:java -Dexec.args=src/main/resources/test.ktr
-```
-
-Documentation
+Overview
 =============
 Kettle Storm is an experimental execution environment to execute a Kettle transformation across a Storm cluster. This decomposes a transformation into a topology and wraps all steps in either a Storm Spout or a Bolt. The topology is then submitted to the cluster and is automatically killed once the transformation has finished processing all data.
 
 Many things are not implemented. I've only tested this for the transformation files included on a small cluster. There are quite a few details left to be implemented. Some of which include:
 
-- Steps that do not emit at least one message for every input:
+- Steps that do not emit at least one message for every input. Because Kettle does not have a message id to correlate Storm messages with we cannot guarantee a message has been completely processed until we see a record emited from a given step. Because of this, we also cannot determine which messages are produced for a given input if they are not immediately emitted as part of the same ```processRow()``` call. As such, we can only guarantee message processing when one input message produces at least once output message. These classification of input steps will not work until that is fixed:
   - Sampling
   - Aggregation
   - Sorting
@@ -34,20 +21,37 @@ Many things are not implemented. I've only tested this for the transformation fi
 - Sub-transformations
 - Metrics: Kettle timing, throughput, logging
 
+Usage
+=====
 Executing a Kettle transformation with Storm
 --------------------------------------------
+The following commands will execute a transformation using a local in-memory test cluster.
 
 ### From a checkout
 A Kettle transformation can be submitted as a topology using the included KettleStorm command-line application. To invoke it from Maven simply use the maven exec target with the Kettle transformation you wish to execute:
 ```
-mvn assembly:assembly -Passembly
-mvn exec:java -Dexec.args=src/main/resources/test.ktr
+mvn package
+mvn exec:java -Dexec.args=src/main/resources/test.ktr -Dkettle-storm-local-mode=true 
 ```
 
-### From a release archive
-Extract the release archive and run:
+### From a release
+Extract the release and run:
 ```
-java -jar kettle-storm-${version}.jar path/to/my.ktr
+java -Dkettle-storm-local-mode=true -jar kettle-engine-storm-${version}-assembly.jar path/to/my.ktr
+```
+
+Executing on a Storm cluster
+---------------------------
+The following instructions are meant to be executed using the artifacts packaged in a release.
+
+To execute a transformation on a Storm cluster running on the same host simply run:
+```
+java -jar kettle-engine-storm-${version}-assembly.jar path/to/my.ktr
+```
+
+To execute the transformation to a Nimbus host running remotely include the host and port via the ```storm.options``` System property:
+```
+java -Dstorm.options=nimbus.host=my-nimbus,nimbus.thrift.port=6628 -jar kettle-engine-storm-${version}-assembly.jar path/to/my.ktr
 ```
 
 ### Configuration via System Properties
