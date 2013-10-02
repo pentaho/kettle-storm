@@ -8,7 +8,7 @@
   <packaging>jar</packaging>
 
   <name>kettle-engine-storm</name>
-  <url>http://maven.apache.org</url>
+  <url>http://github.com/pentaho/kettle-storm</url>
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -18,7 +18,7 @@
     <storm.signals.version>0.2.0</storm.signals.version>
     <kettle.version>TRUNK-SNAPSHOT</kettle.version>
     <main.class>org.pentaho.kettle.engines.storm.KettleStorm</main.class>
-    <kettle.storm.topology.jar>${project.build.finalName}-jar-with-dependencies.jar</kettle.storm.topology.jar>
+    <kettle.storm.topology.jar>${project.build.finalName}-for-remote-topology.jar</kettle.storm.topology.jar>
   </properties>
 
   <repositories>
@@ -41,8 +41,7 @@
       <groupId>storm</groupId>
       <artifactId>storm</artifactId>
       <version>${storm.version}</version>
-      <!-- keep storm out of the jar-with-dependencies -->
-      <scope>${storm.scope}</scope>
+      <scope>provided</scope>
     </dependency>
 
     <dependency>
@@ -87,15 +86,6 @@
     </dependency>
   </dependencies>
 
-  <profiles>
-    <profile>
-      <id>assembly</id>
-      <properties>
-        <storm.scope>provided</storm.scope>
-      </properties>
-    </profile>
-  </profiles>
-
   <build>
     <resources>
       <resource>
@@ -126,7 +116,7 @@
           </execution>
         </executions>
         <configuration>
-          <mainClass>org.pentaho.kettle.engines.storm.KettleStorm</mainClass>
+          <mainClass>${main.class}</mainClass>
           <!--
               Configure the topology jar to point to the one in the target directory.
               The default path is configured for the release archive directory structure.
@@ -134,45 +124,50 @@
           <systemProperties>
             <property>
               <key>kettle-storm-topology-jar</key>
-              <value>target/${kettle.storm.topology.jar}</value>
+              <value>target/${kettle.storm.topology.jar}.jar</value>
             </property>
           </systemProperties>
         </configuration>
       </plugin>
       <plugin>
         <artifactId>maven-assembly-plugin</artifactId>
-        <configuration>
-          <descriptorRefs>
-            <descriptorRef>jar-with-dependencies</descriptorRef>
-          </descriptorRefs>
-          <archive>
-            <manifest>
-              <mainClass>${main.class}</mainClass>
-            </manifest>
-          </archive>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-shade-plugin</artifactId>
-        <version>2.1</version>
-        <configuration>
-          <transformers>
-            <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-              <manifestEntries>
-                <Main-Class>${main.class}</Main-Class>
-                <X-Compile-Source-JDK>${maven.compile.source}</X-Compile-Source-JDK>
-                <X-Compile-Target-JDK>${maven.compile.target}</X-Compile-Target-JDK>
-              </manifestEntries>
-            </transformer>
-          </transformers>
-        </configuration>
+        <version>2.2-beta-5</version>
         <executions>
+          <!-- This assembly will exclude the storm dependency so it can be used to submit a topology to a cluster without creating class loader conflicts. -->
           <execution>
-            <phase>package</phase>
+            <id>for-remote-topology</id>
+            <phase>prepare-package</phase>
             <goals>
-              <goal>shade</goal>
+              <goal>single</goal>
             </goals>
+            <configuration>
+              <descriptors>
+                <descriptor>src/main/assembly/for-remote-topology-assembly.xml</descriptor>
+              </descriptors>
+              <archive>
+                <manifest>
+                  <mainClass>${main.class}</mainClass>
+                </manifest>
+              </archive>
+            </configuration>
+          </execution>
+          <!-- The main assembly configuration. This will include all artifacts and can be used to test locally. -->
+          <execution>
+            <id>assembly</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+            <configuration>
+              <descriptors>
+                <descriptor>src/main/assembly/assembly.xml</descriptor>
+              </descriptors>
+              <archive>
+                <manifest>
+                  <mainClass>${main.class}</mainClass>
+                </manifest>
+              </archive>
+            </configuration>
           </execution>
         </executions>
       </plugin>
