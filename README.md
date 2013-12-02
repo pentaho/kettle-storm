@@ -17,7 +17,6 @@ Many things are not implemented. I've only tested this for the transformation fi
 - Repository-based transformations
 - Error handling
 - Conditional hops
-- Multiple end steps
 - Sub-transformations
 - Metrics: Kettle timing, throughput, logging
 

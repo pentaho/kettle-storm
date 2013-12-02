@@ -19,12 +19,21 @@
 package org.pentaho.kettle.engines.storm;
 
 /**
- * Control signals are sent from component to their dependencies to signal state
- * changes.
+ * Indicates an error sending a notification.
  */
-public enum KettleControlSignal {
-  /**
-   * Indicates a component is done processing.
-   */
-  COMPLETE
+@SuppressWarnings("serial")
+public class NotifierException extends Exception {
+
+  public NotifierException(String message, Throwable cause) {
+    super(message, cause);
+  }
+
+  public NotifierException(String message) {
+    super(message);
+  }
+
+  public NotifierException(Throwable cause) {
+    super(cause);
+  }
+
 }

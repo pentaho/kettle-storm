@@ -18,13 +18,13 @@
 
 package org.pentaho.kettle.engines.storm;
 
-import backtype.storm.Config;
-import backtype.storm.generated.StormTopology;
-import backtype.storm.topology.BoltDeclarer;
-import backtype.storm.topology.OutputFieldsDeclarer;
-import backtype.storm.topology.TopologyBuilder;
-import backtype.storm.tuple.Fields;
-import backtype.storm.utils.Utils;
+import java.io.IOException;
+import java.io.Serializable;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
 import org.pentaho.di.core.Const;
 import org.pentaho.di.core.KettleEnvironment;
 import org.pentaho.di.core.RowSet;
@@ -35,23 +35,21 @@ import org.pentaho.di.trans.Trans;
 import org.pentaho.di.trans.TransConfiguration;
 import org.pentaho.di.trans.TransExecutionConfiguration;
 import org.pentaho.di.trans.TransMeta;
-import org.pentaho.di.trans.step.StepMeta;
 import org.pentaho.di.trans.step.StepMetaDataCombi;
 import org.pentaho.di.trans.step.errorhandling.StreamInterface;
+import org.pentaho.kettle.engines.storm.bolt.KettleControlBolt;
 import org.pentaho.kettle.engines.storm.bolt.KettleStepBolt;
-import org.pentaho.kettle.engines.storm.signal.SimpleSignalClientFactory;
-import org.pentaho.kettle.engines.storm.signal.StepNotifier;
-import org.pentaho.kettle.engines.storm.signal.StormSignalsStepNotifier;
+import org.pentaho.kettle.engines.storm.signal.BasicSignalNotifier;
 import org.pentaho.kettle.engines.storm.spout.KettleStepSpout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.UUID;
+import backtype.storm.Config;
+import backtype.storm.generated.StormTopology;
+import backtype.storm.topology.BoltDeclarer;
+import backtype.storm.topology.OutputFieldsDeclarer;
+import backtype.storm.topology.TopologyBuilder;
+import backtype.storm.tuple.Fields;
 
 /**
  * A collection of utility methods for working with Kettle and Storm.
@@ -87,30 +85,42 @@ public class KettleStormUtils implements Serializable {
     setTopologyName(conf, topologyName);
 
     TopologyBuilder builder = new TopologyBuilder();
+
+    Set<String> leafSteps = collectLeafStepNames(trans);
+    
+    String controlBoltId = topologyName + "-control-bolt";
+    BasicSignalNotifier notifier = new BasicSignalNotifier(controlBoltId);
+    BoltDeclarer controlBoltDeclarer = builder.setBolt(controlBoltId, new KettleControlBolt(topologyName, notifier, leafSteps));
     for (StepMetaDataCombi step : steps) {
       step.step.init(step.meta, step.data);
-      StepNotifier notifier = new StormSignalsStepNotifier(new SimpleSignalClientFactory(buildZkConnectionString(conf)),
-        calculateDownstreamSteps(topologyName, trans, step));
+
+      // The control bolt must receive all signal tuples from all leaf steps
+      if (leafSteps.contains(step.step.getStepname())) {
+        controlBoltDeclarer.allGrouping(step.step.getStepname(), "signal");
+      }
+
       if (isSpout(step)) {
         builder.setSpout(step.step.getStepname(), new KettleStepSpout(
-          step.step.getStepname(), transXml, step, notifier), step.step.getStepMeta().getCopies())
+          step.step.getStepname(), transXml, step), step.step.getStepMeta().getCopies())
           .setMaxTaskParallelism(step.step.getStepMeta().getCopies());
-
       } else {
         BoltDeclarer bd = builder.setBolt(step.step.getStepname(),
           new KettleStepBolt(step.step.getStepname(), transXml,
-            step, notifier), step.step.getStepMeta().getCopies())
+            step), step.step.getStepMeta().getCopies())
           .setMaxTaskParallelism(step.step.getStepMeta().getCopies());
         for (StreamInterface info : step.stepMeta.getStepMetaInterface().getStepIOMeta().getInfoStreams()) {
           StepMetaDataCombi infoStep = findStep(trans,
             info.getStepname());
           bd.fieldsGrouping(info.getStepname(), getOutputFields(infoStep));
+          bd.allGrouping(info.getStepname(), "signal");
         }
         for (RowSet input : step.step.getInputRowSets()) {
           StepMetaDataCombi inputStep = findStep(trans,
             input.getOriginStepName());
           bd.fieldsGrouping(input.getOriginStepName(),
             getOutputFields(inputStep));
+          // All bolts must receive all signal tuples from all previous steps
+          bd.allGrouping(input.getOriginStepName(), "signal");
         }
       }
     }
@@ -119,59 +129,35 @@ public class KettleStormUtils implements Serializable {
   }
 
   /**
-   * Create a ZooKeeper connection string from the configuration provided.
-   *
-   * @param conf
-   * @return
-   * @throws IllegalArgumentException When {@link Config#STORM_ZOOKEEPER_SERVERS} or {@link Config#STORM_ZOOKEEPER_PORT} is invalid.
+   * Find all steps that do not have output hops.
+   * 
+   * @param trans
+   *          The transformation.
+   * @return The set of all steps that do not have output hops.
    */
-  @SuppressWarnings("unchecked")
-  private String buildZkConnectionString(Config conf) throws IllegalArgumentException {
-    List<String> servers = (List<String>) conf.get(Config.STORM_ZOOKEEPER_SERVERS);
-    if (servers == null) {
-      throw new IllegalArgumentException("ZooKeeper servers not provided in configuration (" + Config.STORM_ZOOKEEPER_SERVERS + ")");
-    }
-    // All servers must share the same port
-    int port = Utils.getInt(conf.get(Config.STORM_ZOOKEEPER_PORT));
-
-    StringBuilder sb = new StringBuilder();
-    Iterator<String> iter = servers.iterator();
-    while (iter.hasNext()) {
-      sb.append(iter.next());
-      sb.append(":");
-      sb.append(port);
-      if (iter.hasNext()) {
-        sb.append(",");
+  private Set<String> collectLeafStepNames(Trans trans) {
+    Set<String> leafSteps = new HashSet<String>();
+    for (StepMetaDataCombi step : trans.getSteps()) {
+      if (isLeafStep(trans, step)) {
+        leafSteps.add(step.step.getStepname());
       }
     }
-    return sb.toString();
+    return leafSteps;
+  }
+  
+  private boolean isLeafStep(Trans trans, StepMetaDataCombi step) {
+    return trans.getTransMeta().findNextSteps(step.stepMeta).isEmpty();
   }
 
   /**
-   * Calculate the downstream steps to notify when the given step is done
-   * processing.
-   *
-   * @param topologyName name of topology so leafs steps can notify the transformation
-   *                     engine they are complete.
-   * @param trans        Transformation to look up steps in.
-   * @param step         Step to calculate dependencies of.
-   * @return List of components to notify when the given step is complete.
+   * Finds a step by name within a transformation.
+   * 
+   * @param trans
+   *          Transformation to search within.
+   * @param stepName
+   *          Name of step to look up.
+   * @return The first step found whose stepname matches the provided one.
    */
-  private List<String> calculateDownstreamSteps(String topologyName, Trans trans, StepMetaDataCombi step) {
-    List<String> dependentSteps = new ArrayList<>();
-    List<StepMeta> nextSteps = trans.getTransMeta().findNextSteps(step.stepMeta);
-    for (StepMeta next : nextSteps) {
-      dependentSteps.add(next.getName());
-    }
-
-    if (dependentSteps.isEmpty()) {
-      // Signal that the transformation is complete! (TODO make sure we handle multiple end nodes...)
-      dependentSteps.add(topologyName);
-    }
-
-    return dependentSteps;
-  }
-
   private StepMetaDataCombi findStep(Trans trans, String stepName) {
     for (StepMetaDataCombi step : trans.getSteps()) {
       if (stepName.equals(step.step.getStepname())) {

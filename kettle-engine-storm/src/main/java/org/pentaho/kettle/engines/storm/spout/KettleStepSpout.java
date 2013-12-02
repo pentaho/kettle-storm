@@ -18,34 +18,40 @@
 
 package org.pentaho.kettle.engines.storm.spout;
 
-import backtype.storm.contrib.signals.spout.BaseSignalSpout;
-import backtype.storm.spout.SpoutOutputCollector;
-import backtype.storm.task.TopologyContext;
-import backtype.storm.topology.OutputFieldsDeclarer;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
 import org.pentaho.di.core.exception.KettleException;
 import org.pentaho.di.trans.step.StepMetaDataCombi;
 import org.pentaho.kettle.engines.storm.BaseSpoutOutputCollector;
 import org.pentaho.kettle.engines.storm.CollectorRowListener;
 import org.pentaho.kettle.engines.storm.KettleControlSignal;
 import org.pentaho.kettle.engines.storm.KettleStormUtils;
-import org.pentaho.kettle.engines.storm.signal.StepNotifier;
+import org.pentaho.kettle.engines.storm.signal.KettleSignal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import backtype.storm.spout.SpoutOutputCollector;
+import backtype.storm.task.TopologyContext;
+import backtype.storm.topology.OutputFieldsDeclarer;
+import backtype.storm.topology.base.BaseRichSpout;
+import backtype.storm.tuple.Fields;
 
 /**
  * A Kettle Step Spout represents a Kettle step that produces records and specifically does not receive any input from other Kettle steps.
  * This encapsulates the logic to produce messages within Storm to be processed by downstream bolts.
  */
 @SuppressWarnings("serial")
-public class KettleStepSpout extends BaseSignalSpout {
+public class KettleStepSpout extends BaseRichSpout {
   private static final Logger logger = LoggerFactory
     .getLogger(KettleStepSpout.class);
   private KettleStormUtils utils = new KettleStormUtils();
+
+  private String componentId;
+  private Integer taskId;
 
   private String transXml;
   private String stepName;
@@ -53,30 +59,33 @@ public class KettleStepSpout extends BaseSignalSpout {
   private transient StepMetaDataCombi step;
 
   private boolean done = false;
+  
+  private Object signalCompleteMessageId;
 
-  private StepNotifier notifier;
   /**
    * The set of pending messages we're waiting to be ack'd. This should be thread-safe.
    */
   private Set<Object> pendingMessages;
+  
+  private SpoutOutputCollector collector;
 
   public KettleStepSpout(String name, String transXml,
-                         StepMetaDataCombi step, StepNotifier notifier) {
-    super(name);
+                         StepMetaDataCombi step) {
     if (transXml == null || step == null) {
       throw new NullPointerException();
     }
     this.stepName = name;
     this.step = step;
     this.transXml = transXml;
-    this.notifier = notifier;
   }
 
   @Override
   @SuppressWarnings("rawtypes")
   public void open(Map conf, TopologyContext context,
                    SpoutOutputCollector collector) {
-    super.open(conf, context, collector);
+    componentId = context.getThisComponentId();
+    taskId = context.getThisTaskId();
+    this.collector = collector;
     try {
       this.step = utils.getStep(transXml, stepName);
     } catch (KettleException e) {
@@ -112,17 +121,29 @@ public class KettleStepSpout extends BaseSignalSpout {
   @Override
   public void declareOutputFields(OutputFieldsDeclarer declarer) {
     utils.declareOutputFields(step, declarer);
+    declarer.declareStream("signal", new Fields("signal"));
   }
 
   @Override
   public void ack(Object msgId) {
-    handleCompleted(msgId);
+    // Only handle completed row messages. If the ack'd message id is the signal
+    // complete message then we're done!
+    if (!msgId.equals(signalCompleteMessageId)) {
+      handleCompleted(msgId);
+    }
   }
 
   @Override
   public void fail(Object msgId) {
-    logger.error("Message failed processing: " + msgId);
-    handleCompleted(msgId);
+    if (msgId.equals(signalCompleteMessageId)) {
+      logger.error("Error processing signal complete message. Resending...");
+      // Send the signal complete message again
+      // TODO we should set a retry limit
+      signalComplete();
+    } else {
+      logger.error("Message failed processing: " + msgId);
+      handleCompleted(msgId);
+    }
   }
 
   private void handleCompleted(Object msgId) {
@@ -133,21 +154,17 @@ public class KettleStepSpout extends BaseSignalSpout {
     if (done && pendingMessages.isEmpty()) {
       step.step.dispose(step.meta, step.data);
       step.step.markStop();
-      try {
-        notifier.notify(stepName, KettleControlSignal.COMPLETE);
-      } catch (Exception e) {
-        logger.warn(stepName + ": Error notifying downstream steps", e);
-      }
+      signalComplete();
     }
   }
 
-  @Override
-  public void onSignal(byte[] data) {
-    logger.debug("Spout ({}) received signal: {}", stepName, data);
+  private void signalComplete() {
+    logger.info("Signaling complete for step " + stepName + " with taskId=" + taskId + ".");
     try {
-      notifier.deserialize(data);
-    } catch (Exception ex) {
-      logger.error("Unable to process signal notification", ex);
+      signalCompleteMessageId = UUID.randomUUID();
+      collector.emit("signal", Collections.<Object> singletonList(new KettleSignal(componentId, taskId, KettleControlSignal.COMPLETE)), signalCompleteMessageId);
+    } catch (Exception e) {
+      logger.warn(stepName + ": Error notifying downstream steps", e);
     }
   }
 }

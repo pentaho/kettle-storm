@@ -18,7 +18,6 @@
 
 package org.pentaho.kettle.engines.storm;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Properties;
 

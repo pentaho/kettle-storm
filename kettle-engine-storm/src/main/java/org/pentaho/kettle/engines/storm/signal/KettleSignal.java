@@ -23,21 +23,27 @@ import org.pentaho.kettle.engines.storm.KettleControlSignal;
 import java.io.Serializable;
 
 /**
- * Represents a control message for a Kettle step. This is used to indicate state changes between steps running as Spouts or Bolts within a
- * Storm topology.
+ * Represents a control message for a Kettle step. This is used to indicate
+ * state changes between steps running as Spouts or Bolts within a Storm
+ * topology.
+ * 
+ * TODO Do we need the component and task ids here? Look into simply using the Tuple's.
  */
 @SuppressWarnings("serial")
 public class KettleSignal implements Serializable {
-  private String stepName;
+  private String componentId;
   private KettleControlSignal signal;
+  private Integer taskId;
 
-  public KettleSignal(String stepName, KettleControlSignal signal) {
-    this.stepName = stepName;
+  public KettleSignal(String componentId, Integer taskId,
+      KettleControlSignal signal) {
+    this.componentId = componentId;
+    this.taskId = taskId;
     this.signal = signal;
   }
 
-  public String getStepName() {
-    return stepName;
+  public String getComponentId() {
+    return componentId;
   }
 
   public KettleControlSignal getSignal() {
@@ -46,7 +52,11 @@ public class KettleSignal implements Serializable {
 
   @Override
   public String toString() {
-    return "KettleSignal {stepName=" + stepName + ",signal="
-      + signal.name() + "}";
+    return "KettleSignal {componentId=" + componentId + ",taskId=" + taskId
+        + ",signal=" + signal.name() + "}";
+  }
+
+  public Integer getTaskId() {
+    return taskId;
   }
 }
