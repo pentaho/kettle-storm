@@ -117,6 +117,8 @@
         </executions>
         <configuration>
           <mainClass>${main.class}</mainClass>
+          <!-- We need the provided dependencies too (namely storm) -->
+          <classpathScope>compile</classpathScope>
           <!--
               Configure the topology jar to point to the one in the target directory.
               The default path is configured for the release archive directory structure.
@@ -124,7 +126,7 @@
           <systemProperties>
             <property>
               <key>kettle-storm-topology-jar</key>
-              <value>target/${kettle.storm.topology.jar}.jar</value>
+              <value>target/${kettle.storm.topology.jar}</value>
             </property>
           </systemProperties>
         </configuration>
